@@ -1,0 +1,105 @@
+name: Update Scores Pages
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '2023/**'
+      - '2024/**'
+      - '2025/**'
+      - '2026/**'
+      - '2027/**'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate year HTML pages
+        run: |
+          python3 << 'EOF'
+          import os
+          from pathlib import Path
+          from datetime import datetime
+
+          years = ["2023", "2024", "2025", "2026", "2027"]
+          style = """
+            body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+            h1 { border-bottom: 2px solid #333; padding-bottom: 8px; }
+            ul { padding-left: 20px; }
+            li { margin: 6px 0; }
+            a { color: #0066cc; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+          """
+
+          def nice_name(filename):
+              name = filename.replace(".pdf.pdf", "").replace(".pdf", "")
+              parts = name.split("_")
+              if len(parts) < 3:
+                  return name
+              date = parts[0]
+              kind = parts[1]
+              report = "_".join(parts[2:])
+              kind_map = {"main": "Main", "wb": "Wild Bunch", "ws": "WS", "state": "State Match"}
+              report_map = {"overall": "Overall", "category": "By Category", "clean": "Clean", "extras": "Extras", "details": "Details"}
+              return f"{kind_map.get(kind, kind.title())} – {report_map.get(report, report.title())}"
+
+          for year in years:
+              folder = Path(year)
+              if not folder.exists():
+                  continue
+              pdfs = sorted([f.name for f in folder.glob("*.pdf*")])
+              if not pdfs:
+                  continue
+
+              # Group by date
+              from collections import defaultdict
+              groups = defaultdict(list)
+              for pdf in pdfs:
+                  date = pdf[:10]  # YYYY-MM-DD
+                  groups[date].append(pdf)
+
+              html = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{year} Scores – Wartrace Regulators</title>
+            <style>{style}</style>
+          </head>
+          <body>
+            <h1>{year} Scores</h1>
+            <ul>
+          """
+              for date in sorted(groups.keys()):
+                  try:
+                      dt = datetime.strptime(date, "%Y-%m-%d")
+                      heading = dt.strftime("%B %-d").replace(" 0", " ")
+                  except:
+                      heading = date
+                  html += f"    <li><strong>{heading}</strong>\n      <ul>\n"
+                  for pdf in sorted(groups[date]):
+                      label = nice_name(pdf)
+                      html += f'        <li><a href="{year}/{pdf}">{label}</a></li>\n'
+                  html += "      </ul>\n    </li>\n"
+
+              html += """  </ul>
+            <p><a href="index.html">← Back to all scores</a></p>
+          </body>
+          </html>
+          """
+              Path(f"{year}.html").write_text(html)
+              print(f"Updated {year}.html")
+
+          EOF
+
+      - name: Commit updated HTML
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add *.html
+          git diff --staged --quiet || git commit -m "Auto-update year score pages"
+          git push
