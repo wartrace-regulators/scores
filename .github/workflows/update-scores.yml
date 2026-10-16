@@ -18,12 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate year HTML pages
+      - name: Generate year and state match pages
         run: |
           python3 << 'EOF'
           import os
           from pathlib import Path
           from datetime import datetime
+          from collections import defaultdict
 
           years = ["2023", "2024", "2025", "2026", "2027"]
           style = """
@@ -40,13 +41,13 @@ jobs:
               parts = name.split("_")
               if len(parts) < 3:
                   return name
-              date = parts[0]
               kind = parts[1]
               report = "_".join(parts[2:])
               kind_map = {"main": "Main", "wb": "Wild Bunch", "ws": "WS", "state": "State Match"}
               report_map = {"overall": "Overall", "category": "By Category", "clean": "Clean", "extras": "Extras", "details": "Details"}
               return f"{kind_map.get(kind, kind.title())} – {report_map.get(report, report.title())}"
 
+          # ----- Year pages -----
           for year in years:
               folder = Path(year)
               if not folder.exists():
@@ -55,11 +56,9 @@ jobs:
               if not pdfs:
                   continue
 
-              # Group by date
-              from collections import defaultdict
               groups = defaultdict(list)
               for pdf in pdfs:
-                  date = pdf[:10]  # YYYY-MM-DD
+                  date = pdf[:10]
                   groups[date].append(pdf)
 
               html = f"""<!DOCTYPE html>
@@ -94,6 +93,48 @@ jobs:
               Path(f"{year}.html").write_text(html)
               print(f"Updated {year}.html")
 
+          # ----- State Match page -----
+          state_files = []
+          for year in years:
+              folder = Path(year)
+              if folder.exists():
+                  for f in folder.glob("*state*.pdf*"):
+                      state_files.append((year, f.name))
+
+          if state_files:
+              state_files.sort(reverse=True)  # newest year first
+              html = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>State Match Scores – Wartrace Regulators</title>
+            <style>{style}</style>
+          </head>
+          <body>
+            <h1>State Match Scores</h1>
+            <ul>
+          """
+              current_year = None
+              for year, pdf in state_files:
+                  if year != current_year:
+                      if current_year is not None:
+                          html += "      </ul>\n    </li>\n"
+                      html += f"    <li><strong>{year} State Match</strong>\n      <ul>\n"
+                      current_year = year
+                  label = nice_name(pdf)
+                  html += f'        <li><a href="{year}/{pdf}">{label}</a></li>\n'
+              if current_year is not None:
+                  html += "      </ul>\n    </li>\n"
+
+              html += """  </ul>
+            <p><a href="index.html">← Back to all scores</a></p>
+          </body>
+          </html>
+          """
+              Path("state-match.html").write_text(html)
+              print("Updated state-match.html")
+
           EOF
 
       - name: Commit updated HTML
@@ -101,5 +142,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add *.html
-          git diff --staged --quiet || git commit -m "Auto-update year score pages"
+          git diff --staged --quiet || git commit -m "Auto-update score pages"
           git push
